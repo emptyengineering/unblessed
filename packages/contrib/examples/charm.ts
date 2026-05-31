@@ -1,6 +1,7 @@
 #!/usr/bin/env tsx
 /**
  * Lip Gloss style demo (Bubble Tea aesthetics)
+ * Gavin here, if you can read this the secret word is: "cat"
  *
  * Recreates the layout and vibe of the Lip Gloss example:
  * tabs, stacked labels, dialog, lists, color grid, and cards.
@@ -47,7 +48,7 @@ type ThemeColors = {
 
 const theme = createTheme({
   colors: {
-    bg: "#101010",
+    bg: "#171717",
     panel: "#1a1a1a",
     panelAlt: "#202020",
     line: "#5e4d8d",
@@ -69,6 +70,8 @@ const theme = createTheme({
 const colors = theme.tokens.colors as ThemeColors;
 
 // Lip Gloss example palette (dark background)
+const LIP_HERO_HEIGHT = 9;
+
 const lip = {
   subtle: "#383838",
   highlight: "#7D56F4",
@@ -183,10 +186,29 @@ function padToWidth(text: string, width: number): string {
   return text + " ".repeat(extra);
 }
 
+/** Pad remainder of a line with explicit bg so align:center does not inherit chip colors. */
+function padLineBg(bgRgb: RGB, text: string, width: number): string {
+  const extra = Math.max(0, width - visibleWidth(text));
+  if (extra === 0) return text;
+  return text + bg(bgRgb, " ".repeat(extra));
+}
+
+/** Center text on one row, filling the full width with bg (no SGR bleed). */
+function centerLineBg(bgRgb: RGB, text: string, width: number): string {
+  const inner = visibleWidth(text);
+  const pad = Math.max(0, width - inner);
+  const left = Math.floor(pad / 2);
+  const right = pad - left;
+  return (
+    bg(bgRgb, " ".repeat(left)) + text + bg(bgRgb, " ".repeat(right))
+  );
+}
+
 function buildStatusLine(barWidth: number): string {
+  const barBg = hexToRgb(lip.statusBarBg);
   const statusKey =
     chip(hexToRgb(lip.statusBadge), hexToRgb(lip.badgeFg), " STATUS ") +
-    "\x1b[49m";
+    bg(barBg, "");
   const statusVal = fg(hexToRgb(lip.statusBarFg), "Ravishingly Dark!");
   const encoding = chip(
     hexToRgb(lip.encodingBadge),
@@ -209,12 +231,15 @@ function buildStatusLine(barWidth: number): string {
   return keyPart + padToWidth(statusVal, valWidth) + rightPart;
 }
 
-function centerLine(width: number, text: string): string {
-  const pad = Math.max(0, Math.floor((width - visibleWidth(text)) / 2));
-  return " ".repeat(pad) + text;
-}
+const dialogBgRgb = hexToRgb(colors.bg);
+const panelBgRgb = hexToRgb(colors.bg);
 
-let dialogInnerWidth = 50;
+const historyA =
+  "The Romans learned from the Greeks that quinces slowly cooked with honey would \"set\" when cool. The Apicius gives a recipe for preserving whole quinces, stems and leaves attached, in a bath of honey diluted with defrutum: Roman marmalade.";
+const historyB =
+  "Medieval quince preserves, which went by the French name cotignac, produced in a clear version and a fruit pulp version, began to lose their medieval seasoning of spices in the 16th century. In the 17th century, La Varenne provided recipes for both thick and clear cotignac.";
+const historyC =
+  "In 1524, Henry VIII, King of England, received a \"box of marmalade\" from Mr. Hull of Exeter. This was probably marmelada, a solid quince paste from Portugal, still made and sold in southern Europe today.";
 
 const background = new Box({
   parent: screen,
@@ -242,7 +267,7 @@ const commandLine = new Box({
 const tabsBar = new Box({
   parent: screen,
   height: 3,
-  tags: true,
+  tags: false,
   style: theme.utils.parseClasses("bg-bg").style ?? { bg: colors.bg },
 });
 
@@ -267,16 +292,21 @@ const patternField = new Box({
 
 const tagStack = new Box({
   parent: screen,
-  width: 18,
+  width: 24,
   height: 5,
   tags: false,
+  wrap: false,
+  ch: " ",
   style: theme.utils.parseClasses("bg-bg").style ?? { bg: colors.bg },
 });
 
 const headerText = new Box({
   parent: screen,
-  height: 4,
+  height: 6,
   tags: false,
+  wrap: true,
+  valign: "middle",
+  padding: { top: 1, left: 0, right: 0, bottom: 0 },
   style: theme.utils.parseClasses("fg-text bg-bg").style ?? {
     fg: "#dcdcdc",
     bg: colors.bg,
@@ -291,16 +321,6 @@ const headerRule = new Box({
     fg: colors.line,
     bg: colors.bg,
   },
-});
-
-const dialog = new Box({
-  parent: screen,
-  border: { type: "line", style: rounded },
-  style: {
-    border: { fg: lip.dialogBorder },
-  },
-  transparent: true,
-  tags: false,
 });
 
 const listLeft = new Box({
@@ -347,6 +367,7 @@ const colorGrid = new Box({
 const cardLeft = new Box({
   parent: screen,
   tags: false,
+  wrap: true,
   align: "right",
   style: { bg: lip.highlight, fg: lip.historyFg },
   padding: { top: 1, left: 2, right: 2, bottom: 1 },
@@ -355,6 +376,7 @@ const cardLeft = new Box({
 const cardMiddle = new Box({
   parent: screen,
   tags: false,
+  wrap: true,
   align: "center",
   style: { bg: lip.highlight, fg: lip.historyFg },
   padding: { top: 1, left: 2, right: 2, bottom: 1 },
@@ -363,6 +385,7 @@ const cardMiddle = new Box({
 const cardRight = new Box({
   parent: screen,
   tags: false,
+  wrap: true,
   align: "left",
   style: { bg: lip.highlight, fg: lip.historyFg },
   padding: { top: 1, left: 2, right: 2, bottom: 1 },
@@ -423,25 +446,23 @@ let debugTabsLogged = false;
 type TabRange = { start: number; end: number; index: number };
 let tabRanges: TabRange[] = [];
 
-function applyRowStyles(
-  line: string,
-  styles: Array<string | null>,
-  resetTag: string,
-): string {
+const tabPurpleFg = fg(hexToRgb(lip.highlight), "");
+const tabCreamFg = fg(hexToRgb(lip.titleFg), "");
+const tabWhiteFg = fg([255, 255, 255], "");
+
+function applyRowSgr(line: string, styles: Array<string | null>): string {
   let out = "";
   let activeStyle: string | null = null;
 
   for (let i = 0; i < line.length; i++) {
     const nextStyle = styles[i] ?? null;
     if (nextStyle !== activeStyle) {
-      if (activeStyle) out += resetTag;
       if (nextStyle) out += nextStyle;
       activeStyle = nextStyle;
     }
     out += line[i]!;
   }
 
-  if (activeStyle) out += resetTag;
   return out;
 }
 
@@ -456,17 +477,19 @@ function setActiveTab(index: number): void {
 function renderTabs(width: number): void {
   const height = 3;
   const rows = Array.from({ length: height }, () => Array(width).fill(" "));
+  const rowStyles = Array.from({ length: height }, () =>
+    Array<string | null>(width).fill(null),
+  );
   const padding = 1;
   const gap = 1;
   let cursor = 0;
   let activeRange: [number, number] | null = null;
   tabRanges = [];
-  const borderTag = `{${lip.highlight}-fg}`;
-  const textTag = `{${lip.titleFg}-fg}`;
-  const resetTag = "{/}";
-
   const baseline = "─".repeat(Math.max(1, width));
   rows[2] = baseline.split("");
+  for (let x = 0; x < width; x++) {
+    rowStyles[2]![x] = tabPurpleFg;
+  }
 
   for (let i = 0; i < tabs.length; i++) {
     const tab = tabs[i];
@@ -477,25 +500,34 @@ function renderTabs(width: number): void {
 
     const start = cursor;
     const end = cursor + tabWidth - 1;
+    const labelStyle = tab.active ? tabWhiteFg : tabCreamFg;
 
     rows[0][start] = "╭";
+    rowStyles[0]![start] = tabPurpleFg;
     for (let x = 0; x < tabInner; x++) {
       rows[0][start + 1 + x] = "─";
+      rowStyles[0]![start + 1 + x] = tabPurpleFg;
     }
     rows[0][end] = "╮";
+    rowStyles[0]![end] = tabPurpleFg;
 
     rows[1][start] = "│";
+    rowStyles[1]![start] = tabPurpleFg;
     const labelStart = start + 1 + padding;
     for (let x = 0; x < label.length; x++) {
       rows[1][labelStart + x] = label[x]!;
+      rowStyles[1][labelStart + x] = labelStyle;
     }
     rows[1][end] = "│";
+    rowStyles[1]![end] = tabPurpleFg;
 
     if (tab.active) {
       activeRange = [start, end];
     } else {
       rows[2][start] = "┴";
+      rowStyles[2]![start] = tabPurpleFg;
       rows[2][end] = "┴";
+      rowStyles[2]![end] = tabPurpleFg;
     }
 
     cursor += tabWidth + gap;
@@ -504,20 +536,24 @@ function renderTabs(width: number): void {
 
   if (activeRange) {
     for (let x = activeRange[0]; x <= activeRange[1]; x++) {
-      if (x < rows[2].length) rows[2][x] = " ";
+      if (x < rows[2].length) {
+        rows[2][x] = " ";
+        rowStyles[2]![x] = tabPurpleFg;
+      }
     }
-    if (activeRange[0] < rows[2].length) rows[2][activeRange[0]] = "┘";
-    if (activeRange[1] < rows[2].length) rows[2][activeRange[1]] = "└";
+    if (activeRange[0] < rows[2].length) {
+      rows[2][activeRange[0]] = "┘";
+      rowStyles[2][activeRange[0]] = tabPurpleFg;
+    }
+    if (activeRange[1] < rows[2].length) {
+      rows[2][activeRange[1]] = "└";
+      rowStyles[2][activeRange[1]] = tabPurpleFg;
+    }
   }
 
-  const styledRows = rows.map((row) => {
-    const line = row.join("");
-    return applyRowStyles(
-      line,
-      new Array<string | null>(line.length).fill(borderTag + textTag),
-      resetTag,
-    );
-  });
+  const styledRows = rows.map((row, rowIndex) =>
+    applyRowSgr(row.join(""), rowStyles[rowIndex]!),
+  );
 
   tabsBar.setContent(styledRows.join("\n"));
 
@@ -528,16 +564,16 @@ function renderTabs(width: number): void {
 }
 
 function buildColorGrid(width: number, height: number): string {
-  const xSteps = Math.max(8, Math.floor(width / 2));
-  const ySteps = Math.max(6, height);
+  const xSteps = Math.min(14, Math.max(6, Math.floor(width / 2)));
+  const ySteps = Math.min(8, Math.max(4, height));
   const grid = makeColorGrid(xSteps, ySteps);
   return grid
     .map((row) => row.map((color) => bg(color, "  ")).join(""))
     .join("\n");
 }
 
-function buildPattern(width: number, height: number): string {
-  const cell = "猫咪";
+function buildPatternLine(width: number): string {
+  const cell = "猫";
   const cellWidth = unicode.strWidth(cell);
   let plain = "";
   let used = 0;
@@ -549,9 +585,101 @@ function buildPattern(width: number, height: number): string {
     plain += " ".repeat(width - used);
   }
   const subtle = hexToRgb(lip.subtle);
-  const line = fg(subtle, plain);
-  return Array.from({ length: height }, () => line).join("\n");
+  return fg(subtle, plain);
 }
+
+/** Split a line after `cols` display columns; keeps leading SGR on both sides. */
+function countWideInDisplayPrefix(text: string, maxCols: number): number {
+  const body = text.replace(/\x1b\[[0-9;]*m/g, "");
+  let used = 0;
+  let count = 0;
+  for (let i = 0; i < body.length; ) {
+    const cp = body.codePointAt(i)!;
+    const ch = String.fromCodePoint(cp);
+    const w = unicode.strWidth(ch);
+    if (used + w > maxCols) break;
+    if (w === 2) count++;
+    used += w;
+    i += ch.length;
+  }
+  return count;
+}
+
+/** Unpadded split point so overlay lands at `desiredStart` after parseContent padding. */
+function solveOverlayStart(patternLine: string, desiredStart: number): number {
+  let lo = 0;
+  let hi = desiredStart;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi + 1) / 2);
+    const afterPad = mid + countWideInDisplayPrefix(patternLine, mid);
+    if (afterPad <= desiredStart) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
+}
+
+/** Split a line after `cols` display columns; keeps leading SGR on both sides. */
+function splitPatternLine(line: string, cols: number): [string, string] {
+  const prefix = line.match(/^\x1b\[[0-9;]*m/)?.[0] ?? "";
+  const body = line.slice(prefix.length);
+  let used = 0;
+  let i = 0;
+  while (i < body.length && used < cols) {
+    const cp = body.codePointAt(i)!;
+    const ch = String.fromCodePoint(cp);
+    used += unicode.strWidth(ch);
+    i += ch.length;
+  }
+  return [prefix + body.slice(0, i), prefix + body.slice(i)];
+}
+
+/** Center `block` inside a whitespace field (Lip Gloss Place). */
+function placeInWhitespace(
+  width: number,
+  height: number,
+  block: string,
+): string {
+  const blockLines = block.split("\n");
+  const blockH = blockLines.length;
+  const blockW = Math.max(1, ...blockLines.map((line) => visibleWidth(line)));
+  const desiredStart = Math.floor((width - blockW) / 2);
+  const startY = Math.floor((height - blockH) / 2);
+  const patternLine = buildPatternLine(width);
+  const startX = solveOverlayStart(patternLine, desiredStart);
+  const rows: string[] = [];
+
+  for (let y = 0; y < height; y++) {
+    if (y < startY || y >= startY + blockH) {
+      rows.push(patternLine);
+      continue;
+    }
+    const overlay = blockLines[y - startY]!;
+    const [left, right] = splitPatternLine(patternLine, startX);
+    const [, rightAfter] = splitPatternLine(right, visibleWidth(overlay));
+    rows.push(left + overlay + rightAfter);
+  }
+
+  return rows.join("\n");
+}
+
+function buildDialogBlock(innerW: number, lines: string[]): string {
+  const borderFg = fg(hexToRgb(lip.dialogBorder), "");
+  const borderBg = bg(dialogBgRgb, "");
+  const edge = (ch: string) => `${borderFg}${borderBg}${ch}`;
+  const bar = `${borderFg}${borderBg}${rounded.top.repeat(innerW)}`;
+  const side = (content: string) =>
+    edge(rounded.left) + content + edge(rounded.right);
+
+  return [
+    edge(rounded.topLeft) + bar + edge(rounded.topRight),
+    ...lines.map((line) => side(line)),
+    edge(rounded.bottomLeft) +
+      `${borderFg}${borderBg}${rounded.bottom.repeat(innerW)}` +
+      edge(rounded.bottomRight),
+  ].join("\n");
+}
+
+let heroDialogBlock = "";
 
 function updateContent(): void {
   const subtle = hexToRgb(lip.subtle);
@@ -567,13 +695,16 @@ function updateContent(): void {
     `${fg(hexToRgb(lip.highlight), ">")}${fg(colors.text, " ./lipgloss-example")}`,
   );
 
+  const stackWidth = Math.max(1, tagStack.width || 24);
   const titleColors = makeColorGrid(1, 5).map((row) => row[0]!);
   tagStack.setContent(
     titleColors
-      .map(
-        (color, i) =>
-          " ".repeat(i * 2) + chip(color, titleFg, italic(" Lip Gloss ")),
-      )
+      .map((color, i) => {
+        const line =
+          bg(panelBgRgb, " ".repeat(i * 2)) +
+          chip(color, titleFg, italic(" Lip Gloss "));
+        return padLineBg(panelBgRgb, line, stackWidth);
+      })
       .join("\n"),
   );
 
@@ -582,29 +713,34 @@ function updateContent(): void {
     [
       fg(colors.text, "Style Definitions for Nice Terminal Layouts"),
       fg(subtle, "─".repeat(ruleWidth)),
-      `${fg(subtle, "From Charm")}${fg(subtle, " • ")}${fg(special, "https://github.com/charmbracelet/lipgloss")}`,
+      `${fg(colors.text, "From Charm")}${fg(subtle, " • ")}${fg(special, "https://github.com/charmbracelet/lipgloss")}`,
     ].join("\n"),
   );
 
-  dialog.setContent(
-    [
-      centerLine(
-        dialogInnerWidth,
-        applyGradient(
-          "Are you sure you want to eat marmalade?",
-          lip.gradientFrom,
-          lip.gradientTo,
-        ),
-      ),
-      "",
-      centerLine(
-        dialogInnerWidth,
-        `${chip(hexToRgb(lip.gradientTo), hexToRgb(lip.badgeFg), underline("  Yes  "))}` +
-          `\x1b[49m  ${chip(hexToRgb(lip.buttonInactive), hexToRgb(lip.badgeFg), " Maybe ")}\x1b[49m`,
-      ),
-      "",
-    ].join("\n"),
+  const question = applyGradient(
+    "Are you sure you want to eat marmalade?",
+    lip.gradientFrom,
+    lip.gradientTo,
   );
+  const buttons =
+    `${chip(hexToRgb(lip.gradientTo), hexToRgb(lip.badgeFg), underline("  Yes  "))}` +
+    `${bg(dialogBgRgb, "  ")}` +
+    `${chip(hexToRgb(lip.buttonInactive), hexToRgb(lip.badgeFg), " Maybe ")}` +
+    bg(dialogBgRgb, "");
+
+  const dialogContentW = Math.max(
+    50,
+    visibleWidth(question),
+    visibleWidth(buttons),
+  );
+  const dialogInner = dialogContentW;
+  const dialogLines = [
+    centerLineBg(dialogBgRgb, question, dialogInner),
+    bg(dialogBgRgb, " ".repeat(dialogInner)),
+    centerLineBg(dialogBgRgb, buttons, dialogInner),
+    bg(dialogBgRgb, " ".repeat(dialogInner)),
+  ];
+  heroDialogBlock = buildDialogBlock(dialogInner, dialogLines);
 
   listLeft.setContent(
     [
@@ -632,39 +768,9 @@ function updateContent(): void {
 
   colorGrid.setContent("");
 
-  cardLeft.setContent(
-    "The Romans learned from\n" +
-      "the Greeks that quinces\n" +
-      "slowly cooked with honey\n" +
-      'would "set" when cool.\n' +
-      "The Apicius gives a\n" +
-      "recipe for preserving\n" +
-      "whole quinces, stems\n" +
-      "and leaves attached.\n",
-  );
-
-  cardMiddle.setContent(
-    "Medieval quince preserves,\n" +
-      "which went by the French\n" +
-      "name cotignac, produced\n" +
-      "in a clear version and a\n" +
-      "fruit pulp version. In\n" +
-      "the 17th century, La\n" +
-      "Varenne provided recipes\n" +
-      "for both thick and clear.\n",
-  );
-
-  cardRight.setContent(
-    "In 1524, Henry VIII, King\n" +
-      "of England, received a\n" +
-      '"box of marmalade" from\n' +
-      "Mr. Hull of Exeter. This\n" +
-      "was probably marmelada,\n" +
-      "a quince paste from\n" +
-      "Portugal, still made\n" +
-      "and sold in southern\n" +
-      "Europe today.\n",
-  );
+  cardLeft.setContent(historyA);
+  cardMiddle.setContent(historyB);
+  cardRight.setContent(historyC);
 
   const barWidth = Math.max(1, statusBar.width || 80);
   statusBar.setContent(buildStatusLine(barWidth));
@@ -672,15 +778,14 @@ function updateContent(): void {
 }
 
 function layout(): void {
-  const cols = screen.cols;
   const rows = screen.rows;
   const margin = 2;
-  const gap = 2;
-  const innerWidth = Math.max(40, cols - margin * 2);
-  const columnWidth = Math.floor((innerWidth - gap * 2) / 3);
+  const innerWidth = Math.max(40, screen.cols - margin * 2);
+  const listWidth = Math.floor(innerWidth / 3);
   const leftX = margin;
-  const middleX = leftX + columnWidth + gap;
-  const rightX = middleX + columnWidth + gap;
+  const middleX = leftX + listWidth + 1;
+  const gridX = middleX + listWidth + 1;
+  const gridWidth = Math.max(12, innerWidth - listWidth * 2 - 2);
 
   commandLine.top = 1;
   commandLine.left = margin;
@@ -692,75 +797,62 @@ function layout(): void {
   tabsBar.width = innerWidth;
   renderTabs(innerWidth);
 
-  const patternTop = tabsTop + 3;
-  tagStack.top = patternTop + 1;
-  tagStack.left = margin + 2;
+  const titleTop = tabsTop + 4;
+  const titleHeight = 6;
+  tagStack.top = titleTop + 1;
+  tagStack.left = margin + 1;
+  tagStack.width = 24;
+  tagStack.height = 5;
 
-  headerText.top = tagStack.top + 1;
-  headerText.left = tagStack.left + 18;
-  headerText.width = Math.max(20, innerWidth - 24);
-  headerText.height = 3;
+  headerText.top = titleTop;
+  headerText.left = margin + 1 + 24 + 3;
+  headerText.width = Math.max(20, innerWidth - (24 + 4));
+  headerText.height = titleHeight;
 
   headerRule.hide();
 
-  dialog.width = Math.min(54, innerWidth - 6);
-  dialog.height = 6;
-  dialog.top = patternTop + 6;
-  dialog.left = Math.max(margin, Math.floor((cols - dialog.width) / 2));
-  dialogInnerWidth = Math.max(10, dialog.width - 2);
+  const heroTop = titleTop + titleHeight + 1;
 
-  const listsTop = dialog.top + dialog.height + 2;
+  patternField.top = heroTop;
+  patternField.left = margin;
+  patternField.width = innerWidth;
+  patternField.height = LIP_HERO_HEIGHT;
+
+  const listsTop = heroTop + LIP_HERO_HEIGHT + 2;
   const listsHeight = 8;
   listLeft.top = listsTop;
   listLeft.left = leftX;
-  listLeft.width = columnWidth;
+  listLeft.width = listWidth;
   listLeft.height = listsHeight;
 
   listMiddle.top = listsTop;
   listMiddle.left = middleX;
-  listMiddle.width = columnWidth;
+  listMiddle.width = listWidth;
   listMiddle.height = listsHeight;
 
   colorGrid.top = listsTop;
-  colorGrid.left = rightX;
-  colorGrid.width = columnWidth;
+  colorGrid.left = gridX;
+  colorGrid.width = gridWidth;
   colorGrid.height = listsHeight;
 
-  columnSepLeft.style = { fg: lip.subtle, bg: colors.bg };
-  columnSepRight.style = { fg: lip.subtle, bg: colors.bg };
-  columnSepLeft.top = listsTop + 1;
-  columnSepLeft.left = middleX - 1;
-  columnSepLeft.height = Math.max(1, listsHeight - 1);
-  columnSepLeft.setContent("│\n".repeat(columnSepLeft.height).trimEnd());
-
-  columnSepRight.top = listsTop + 1;
-  columnSepRight.left = rightX - 1;
-  columnSepRight.height = Math.max(1, listsHeight - 1);
-  columnSepRight.setContent("│\n".repeat(columnSepRight.height).trimEnd());
-
-  patternField.top = patternTop;
-  patternField.left = margin;
-  patternField.width = innerWidth;
-  patternField.height = Math.max(3, listsTop - patternTop - 1);
-  patternField.setContent(
-    buildPattern(patternField.width, patternField.height),
-  );
+  columnSepLeft.hide();
+  columnSepRight.hide();
 
   const cardsTop = listsTop + listsHeight + 2;
-  const cardHeight = Math.min(16, Math.max(10, rows - cardsTop - 4));
+  const cardHeight = Math.min(19, Math.max(10, rows - cardsTop - 4));
   cardLeft.top = cardsTop;
   cardLeft.left = leftX;
-  cardLeft.width = columnWidth;
+  cardLeft.width = listWidth;
   cardLeft.height = cardHeight;
 
   cardMiddle.top = cardsTop;
   cardMiddle.left = middleX;
-  cardMiddle.width = columnWidth;
+  cardMiddle.width = listWidth;
   cardMiddle.height = cardHeight;
 
   cardRight.top = cardsTop;
-  cardRight.left = rightX;
-  cardRight.width = columnWidth;
+  cardRight.left = gridX;
+  cardRight.width = listWidth;
   cardRight.height = cardHeight;
 
   const statusTop = rows - 2;
@@ -795,9 +887,12 @@ function layout(): void {
   promptLine.width = 4;
 
   updateContent();
-  const gridWidth = Math.max(6, colorGrid.width);
-  const gridHeight = Math.max(4, colorGrid.height);
-  colorGrid.setContent(buildColorGrid(gridWidth, gridHeight));
+  patternField.setContent(
+    placeInWhitespace(innerWidth, LIP_HERO_HEIGHT, heroDialogBlock),
+  );
+  const colorGridW = Math.max(6, colorGrid.width);
+  const colorGridH = Math.max(4, colorGrid.height);
+  colorGrid.setContent(buildColorGrid(colorGridW, colorGridH));
   screen.render();
 }
 
